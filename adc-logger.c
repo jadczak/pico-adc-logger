@@ -3,18 +3,18 @@
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 #include "pico/stdlib.h"
+#include <arm_acle.h>
 #include <stdio.h>
 
 // #define TIMING
 
 /*
-====TIMING INFO====
-ADC read:
-  2uS
-UART write 1382400 "Hex 0FCE Counts 4046 Voltage 3.2597\r\n":
-  185uS
-UART write 1382400 baud "0fad\n"
-  33uS
+------------------TIMING INFO-----------------
+ADC Read x1                             2   uS
+ADX Read x16 + max/min                  40  uS
+Accumulation                            1   uS
+SIMD Accumulation                       0   uS (WTF?)
+UART TX @1382400 "0fae0fd20fc0\n"       86  uS
 */
 
 absolute_time_t debug_get_time() {
@@ -46,6 +46,8 @@ struct adc_data {
   uint16_t sample;
   int err;
   uart_inst_t *uart;
+  uint16_t min;
+  uint16_t max;
 };
 
 bool sample_adc_callback(struct repeating_timer *t) {
@@ -53,37 +55,97 @@ bool sample_adc_callback(struct repeating_timer *t) {
   with the FIXME lines... I *think* these instructions didn't
   exist before I turned this into a callback.  Maybe has something
   to do with adding userdata to the callback? */
+  const char *error_string = "Error writing to debug buffer\r\n";
   struct adc_data *data = t->user_data;
   absolute_time_t debug_start;
   absolute_time_t debug_end;
   int64_t debug_elapsed;
   char debug_buf[64];
   int debug_err;
+  uint16_t max = 0;
+  uint16_t min = 0xFFFF;
+  const int n_samples = 16;
+  union adc_samples {
+    uint16_t u16[n_samples];
+    uint16x2_t u16x2[n_samples / 2];
+  };
+  union adc_samples samples = {};
+  union sample_accumulator {
+    uint16x2_t full;
+    struct {
+      uint16_t lower;
+      uint16_t upper;
+    };
+  };
+  union sample_accumulator accumulator = {};
+  uint16_t result = {};
+  // gather samples and track max / min
   debug_start = debug_get_time();
-  data->sample = adc_read();
+  for (int i = 0; i < n_samples; ++i) {
+    samples.u16[i] = adc_read();
+    if (samples.u16[i] > max) {
+      max = samples.u16[i];
+    }
+    if (samples.u16[i] < min) {
+      min = samples.u16[i];
+    }
+  }
   debug_end = debug_get_time();
   debug_elapsed = debug_time_diff(debug_start, debug_end);
-  debug_err = sprintf(debug_buf, "ADC sample time (us) %lld\r\n",
-                      debug_elapsed); // FIXME: add r0, sp, #16 ???
+  debug_err =
+      sprintf(debug_buf, "ADC Sample time x16 (uS) %lld\r\n", debug_elapsed);
   if (debug_err < 0) {
-    debug_uart_print(data->uart, "Error writing to debug buffer.\r\n");
-  } else {
-    debug_uart_print(data->uart, debug_buf);
-  }
-  float voltage = (float)3.3 * (float)data->sample /
-                  (1 << 12); // FIXME: ldrh.w r3, [r4, #64] @ 0x40 ???
-  debug_err = sprintf(debug_buf, "Hex %04X Counts %4u Voltage %6.4F\r\n",
-                      data->sample, data->sample,
-                      voltage); // FIXME: vldr s13 [pc, #180] 0x1000031c ???
-  if (debug_err < 0) {
-    debug_uart_print(data->uart, "Error writing to debug buffer.\r\n");
+    debug_uart_print(data->uart, error_string);
   } else {
     debug_uart_print(data->uart, debug_buf);
   }
 
-  int err = sprintf(data->buf, "%04x\n", data->sample);
+  debug_start = debug_get_time();
+#if 1 // SIMD SUM
+  for (int i = 0; i < n_samples / 2; ++i) {
+    accumulator.full = __uadd16(accumulator.full, samples.u16x2[i]);
+  }
+  result = accumulator.lower + accumulator.upper;
+#else
+  for (int i = 0; i < n_samples; ++i) {
+    result += samples.u16[i];
+  }
+#endif // SIMD SUM
+  debug_end = debug_get_time();
+  debug_elapsed = debug_time_diff(debug_start, debug_end);
+  debug_err =
+      sprintf(debug_buf, "Sample accumulation (uS) %lld\r\n", debug_elapsed);
+  if (debug_err < 0) {
+    debug_uart_print(data->uart, error_string);
+  } else {
+    debug_uart_print(data->uart, debug_buf);
+  }
+
+  result = result >> 4;
+  data->max = max;
+  data->min = min;
+  data->sample = result;
+  float voltage = (float)3.3 * (float)result /
+                  (1 << 12); // FIXME: ldrh.w r3, [r4, #64] @ 0x40 ???
+  debug_err =
+      sprintf(debug_buf, "Average: Hex %04X Counts %4u Voltage %6.4F\r\n",
+              result, result,
+              voltage); // FIXME: vldr s13 [pc, #180] 0x1000031c ???
+  if (debug_err < 0) {
+    debug_uart_print(data->uart, error_string);
+  } else {
+    debug_uart_print(data->uart, debug_buf);
+  }
+  debug_err = sprintf(debug_buf, "Min %04X Max %04X Diff %04d\r\n", data->min,
+                      data->max, (data->max - data->min));
+  if (debug_err < 0) {
+    debug_uart_print(data->uart, error_string);
+  } else {
+    debug_uart_print(data->uart, debug_buf);
+  }
+  int err = sprintf(data->buf, "%04x%04x%04x\n", min, max, result);
   if (err < 0) {
-    uart_puts(data->uart, "FFFF\n");
+    uart_puts(data->uart, "FFFFFFFFFFFF\n");
   } else {
     debug_start = debug_get_time();
     uart_puts(data->uart, data->buf);
@@ -92,7 +154,7 @@ bool sample_adc_callback(struct repeating_timer *t) {
     debug_err = sprintf(debug_buf, "UART Write time (us) %lld\r\n",
                         debug_elapsed); // FIXME: mov r2, #0 ???
     if (debug_err < 0) {
-      debug_uart_print(data->uart, "Error writing to debug buffer.\r\n");
+      debug_uart_print(data->uart, error_string);
     } else {
       debug_uart_print(data->uart, debug_buf);
     }
@@ -129,8 +191,10 @@ int main(void) {
   adc_gpio_init(gpio_pin);
   adc_select_input(adc_input);
   struct repeating_timer timer;
-  struct adc_data data = {.buf = {}, .sample = 0, .err = 0, .uart = uart};
-  add_repeating_timer_ms(-1000, sample_adc_callback, &data, &timer);
+  struct adc_data data = {
+      .buf = {}, .sample = 0, .err = 0, .uart = uart, .min = 0, .max = 0};
+  add_repeating_timer_ms(-100, sample_adc_callback, &data, &timer);
+
   while (1) {
   }
   return 0;
