@@ -6,7 +6,7 @@
 #include <arm_acle.h>
 #include <stdio.h>
 
-// #define TIMING
+#define TIMING
 
 /*
 ------------------TIMING INFO-----------------
@@ -71,10 +71,10 @@ bool sample_adc_callback(struct repeating_timer *t) {
   };
   union adc_samples samples = {};
   union sample_accumulator {
-    uint16x2_t full;
+    uint16x2_t u16x2;
     struct {
-      uint16_t lower;
-      uint16_t upper;
+      uint16_t u16_1;
+      uint16_t u16_2;
     };
   };
   union sample_accumulator accumulator = {};
@@ -103,9 +103,9 @@ bool sample_adc_callback(struct repeating_timer *t) {
   debug_start = debug_get_time();
 #if 1 // SIMD SUM
   for (int i = 0; i < n_samples / 2; ++i) {
-    accumulator.full = __uadd16(accumulator.full, samples.u16x2[i]);
+    accumulator.u16x2 = __uadd16(accumulator.u16x2, samples.u16x2[i]);
   }
-  result = accumulator.lower + accumulator.upper;
+  result = accumulator.u16_1 + accumulator.u16_2;
 #else
   for (int i = 0; i < n_samples; ++i) {
     result += samples.u16[i];
