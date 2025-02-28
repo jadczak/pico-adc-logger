@@ -15,6 +15,12 @@ ADX Read x16 + max/min                  40  uS
 Accumulation                            1   uS
 SIMD Accumulation                       0   uS (WTF?)
 UART TX @1382400 "0fae0fd20fc0\n"       86  uS
+
+
+Other timing stuff.  Wrapping the debug printing stuff with
+a variadic and using vsprintf ended up with things taking
+longer (but I guess who cares if I'm just measuring timing stuff)
+but also caused timings to jitter, which is more of a concern.
 */
 
 absolute_time_t debug_get_time() {
