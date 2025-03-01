@@ -67,7 +67,6 @@ bool sample_adc_callback(struct repeating_timer *t) {
   absolute_time_t debug_end;
   int64_t debug_elapsed;
   char debug_buf[64];
-  int debug_err;
   uint16_t max = 0;
   uint16_t min = 0xFFFF;
   const int n_samples = 16;
@@ -98,9 +97,8 @@ bool sample_adc_callback(struct repeating_timer *t) {
   }
   debug_end = debug_get_time();
   debug_elapsed = debug_time_diff(debug_start, debug_end);
-  debug_err =
-      sprintf(debug_buf, "ADC Sample time x16 (uS) %lld\r\n", debug_elapsed);
-  if (debug_err < 0) {
+  if (sprintf(debug_buf, "ADC Sample time x16 (uS) %lld\r\n", debug_elapsed) <
+      0) {
     debug_uart_print(data->uart, error_string);
   } else {
     debug_uart_print(data->uart, debug_buf);
@@ -119,9 +117,8 @@ bool sample_adc_callback(struct repeating_timer *t) {
 #endif // SIMD SUM
   debug_end = debug_get_time();
   debug_elapsed = debug_time_diff(debug_start, debug_end);
-  debug_err =
-      sprintf(debug_buf, "Sample accumulation (uS) %lld\r\n", debug_elapsed);
-  if (debug_err < 0) {
+  if (sprintf(debug_buf, "Sample accumulation (uS) %lld\r\n", debug_elapsed) <
+      0) {
     debug_uart_print(data->uart, error_string);
   } else {
     debug_uart_print(data->uart, debug_buf);
@@ -133,39 +130,33 @@ bool sample_adc_callback(struct repeating_timer *t) {
   data->sample = result;
   float voltage = (float)3.3 * (float)result /
                   (1 << 12); // FIXME: ldrh.w r3, [r4, #64] @ 0x40 ???
-  debug_err =
-      sprintf(debug_buf, "Average: Hex %04X Counts %4u Voltage %6.4F\r\n",
+  if (sprintf(debug_buf, "Average: Hex %04X Counts %4u Voltage %6.4F\r\n",
               result, result,
-              voltage); // FIXME: vldr s13 [pc, #180] 0x1000031c ???
-  if (debug_err < 0) {
+              voltage) < 0) { // FIXME: vldr s13 [pc, #180] 0x1000031c ???
     debug_uart_print(data->uart, error_string);
   } else {
     debug_uart_print(data->uart, debug_buf);
   }
-  debug_err = sprintf(debug_buf, "Min %04X Max %04X Diff %04d\r\n", data->min,
-                      data->max, (data->max - data->min));
-  if (debug_err < 0) {
+  if (sprintf(debug_buf, "Min %04X Max %04X Diff %04d\r\n", data->min,
+              data->max, (data->max - data->min)) < 0) {
     debug_uart_print(data->uart, error_string);
   } else {
     debug_uart_print(data->uart, debug_buf);
   }
-  int err = sprintf(data->buf, "%04x%04x%04x\n", min, max, result);
-  if (err < 0) {
+  if (sprintf(data->buf, "%04x%04x%04x\n", min, max, result) < 0) {
     uart_puts(data->uart, "FFFFFFFFFFFF\n");
   } else {
     debug_start = debug_get_time();
     uart_puts(data->uart, data->buf);
     debug_end = debug_get_time();
     debug_elapsed = debug_time_diff(debug_start, debug_end);
-    debug_err = sprintf(debug_buf, "UART Write time (us) %lld\r\n",
-                        debug_elapsed); // FIXME: mov r2, #0 ???
-    if (debug_err < 0) {
+    if (sprintf(debug_buf, "UART Write time (us) %lld\r\n",
+                debug_elapsed) < 0) { // FIXME: mov r2, #0 ???
       debug_uart_print(data->uart, error_string);
     } else {
       debug_uart_print(data->uart, debug_buf);
     }
   }
-
   return true;
 }
 
