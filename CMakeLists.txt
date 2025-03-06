@@ -5,6 +5,14 @@ cmake_minimum_required(VERSION 3.13)
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# The build system will inherit system variables
+# unet them to ensure we have consistent and
+# non-broken builds.
+unset(ENV{CFLAGS})
+unset(ENV{CXXFLAGS})
+unset(ENV{LDFLAGS})
+
 add_compile_options(-Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -O2)
 
 # Initialise pico_sdk from installed location
